@@ -112,6 +112,22 @@ void Command_Line_Args::set_rho(int argc, char** argv)
     return;
 }
 
+void Command_Line_Args::set_seed(int argc, char** argv)
+{
+    /*
+    * set_seed: Optional --seed=<uint64>. 0 (default) means seed from random_device.
+    */
+    this->seed = 0;
+    for (int i = 1; i < argc; i++)
+    {
+        std::string arg = argv[i];
+        if (arg.rfind("--seed=", 0) == 0)
+        {
+            this->seed = std::stoull(arg.substr(7));
+        }
+    }
+}
+
 void Command_Line_Args::set_input_stream(int argc, char** argv)
 {
     /* 
@@ -198,6 +214,7 @@ Command_Line_Args::Command_Line_Args(int argc, char** argv)
     // Parsing mandatory function parameters 
     this->set_alpha(argc, argv);
     this->set_rho(argc, argv);
+    this->set_seed(argc, argv);
 
     // Parsing optional function parameters
     this->set_input_stream(argc, argv);
@@ -238,4 +255,13 @@ int Command_Line_Args::get_rho() const
     */
 
     return rho; 
+}
+
+unsigned long long Command_Line_Args::get_seed() const
+{
+    /*
+    * get_seed: Function to get RNG seed (0 = random)
+    */
+
+    return seed;
 }

@@ -14,7 +14,7 @@ int main(int argc, char* argv[])
     const Bucket_Partitioned_MDS::CVRP cvrp(args.input());
 
     // Create Bucket-Partitioned-MDS solver
-    const Bucket_Partitioned_MDS::Solver solver(args.get_alpha(), args.get_rho());
+    const Bucket_Partitioned_MDS::Solver solver(args.get_alpha(), args.get_rho(), args.get_seed());
 
     // Solve CVRP using Bucket-Partitioned-MDS solver
     Bucket_Partitioned_MDS::Solution cvrp_solution = solver.solve(cvrp);

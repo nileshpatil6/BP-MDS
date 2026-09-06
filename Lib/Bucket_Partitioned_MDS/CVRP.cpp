@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <iomanip>
 #include <cmath>
+#include <cstdlib>
+#include <sstream>
 
 namespace Bucket_Partitioned_MDS
 {
@@ -40,17 +42,14 @@ namespace Bucket_Partitioned_MDS
         // Allocate nodes
         node.resize(_size);
 
-        // Parsing node co-ordinates
+        // Parsing node co-ordinates (strtol/strtod: no stringstream per line)
         for (int i = 0; i < _size; ++i) {
             getline(input, line);
-
-            std::stringstream iss(line);
-            int id;
-            std::string xStr, yStr;
-
-            iss >> id >> xStr >> yStr;
-            node[i].x = stof(xStr);
-            node[i].y = stof(yStr);
+            const char* p = line.c_str();
+            char* e;
+            std::strtol(p, &e, 10);      // id
+            node[i].x = std::strtod(e, &e);
+            node[i].y = std::strtod(e, &e);
         }
 
         // Skip "DEMAND_SECTION" line
@@ -59,13 +58,10 @@ namespace Bucket_Partitioned_MDS
         // Parsing demands
         for (int i = 0; i < _size; ++i) {
             getline(input, line);
-            std::stringstream iss(line);
-
-            int id;
-            std::string dStr;
-            iss >> id >> dStr;
-
-            node[i].demand = stof(dStr);
+            const char* p = line.c_str();
+            char* e;
+            std::strtol(p, &e, 10);      // id
+            node[i].demand = std::strtod(e, &e);
         }
     }
     

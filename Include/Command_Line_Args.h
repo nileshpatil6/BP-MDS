@@ -22,11 +22,13 @@ private:
     std::ostream* output_stream; // points to either file or std::cout
     double alpha; // in degrees
     int rho; 
+    unsigned long long seed; // 0 = random
  
     void set_input_stream(int, char**);
     void set_output_stream(int, char**);
     void set_alpha(int, char**);
     void set_rho(int, char**);
+    void set_seed(int, char**);
     std::string get_usage();
 public:
     Command_Line_Args(int, char**);
@@ -36,6 +38,7 @@ public:
     // Getters
     double get_alpha() const;
     int get_rho() const;
+    unsigned long long get_seed() const;
 };
 
 #endif

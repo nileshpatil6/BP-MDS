@@ -45,10 +45,13 @@ The code follows this pipeline end-to-end (`Src/Main.cpp` → `Lib/Bucket_Partit
 2. **Parse & init** — CLI args, OpenMP setup  
 3. **Partition α** — angular buckets around the depot  
 4. **MST / bucket** — spanning tree on each bucket  
-5. **ρ × DFS** — randomized depth-first tours; keep the best  
-6. **Merge · verify · `.sol`** — combine routes and write the solution  
+5. **ρ × DFS** — seeded, allocation-free randomized depth-first tours; keep the best orderings  
+6. **Split + local search** — optimal capacity split of the best tours, then 2-opt / Or-opt inside routes and relocate / swap / 2-opt* between routes of a bucket  
+7. **Merge · verify · `.sol`** — combine routes and write the solution  
 
-**In one line:** *partition → MST → diversify DFS → parallel reduce → solution.*
+**In one line:** *partition → MST → diversify DFS → split → local search → parallel reduce → solution.*
+
+See [`Results/IMPROVEMENTS.md`](Results/IMPROVEMENTS.md) for the September 2026 rewrite: 3x to 10x faster and up to 15% cheaper at million scale.
 
 ---
 
@@ -101,6 +104,9 @@ mkdir -p Results/Output/Sample
 | `--rho` | Randomized DFS iterations per bucket |
 | `--input` | Path to a `.vrp` file |
 | `--output` | Where to write the `.sol` |
+| `--seed` | Optional RNG seed for reproducible runs (default random) |
+
+Tuning via environment: `BPMDS_K`, `BPMDS_M`, `BPMDS_KNN`, `BPMDS_WORK`, `BPMDS_PROFILE=1` (see `Results/IMPROVEMENTS.md`).
 
 Full benchmark catalog (**310** instances: CVRPLIB · FILO2 · Synthetic) → [`Inputs/README.md`](Inputs/README.md)  
 Large `.vrp` sets ship as **GitHub Release** zips (folders are gitignored).

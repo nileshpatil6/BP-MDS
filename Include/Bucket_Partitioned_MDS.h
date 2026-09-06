@@ -5,17 +5,18 @@
 #include <vector>
 #include <string>
 #include <cfloat>
+#include <cstdint>
 #include <iostream>
 
 namespace Bucket_Partitioned_MDS
-{ 
+{
     class CVRP
     {
         /*
-        * CVRP: Class for maintaining CVRP 
+        * CVRP: Class for maintaining CVRP
         */
-        
-    private: 
+
+    private:
         capacity_t _capacity;
         int _size;
         std::vector <Point> node;
@@ -26,7 +27,7 @@ namespace Bucket_Partitioned_MDS
         CVRP(
             std::istream&);
         distance_t distance(
-            const node_t, 
+            const node_t,
             const node_t) const;
         const Point& operator[](
             const node_t) const;
@@ -38,7 +39,7 @@ namespace Bucket_Partitioned_MDS
         node_t depot() const;
     };
 
-    class Solution 
+    class Solution
     {
     private:
         double time_for_solving;
@@ -50,8 +51,8 @@ namespace Bucket_Partitioned_MDS
             const CVRP& cvrp);
     public:
         Solution(
-            const double, 
-            const double, 
+            const double,
+            const double,
             const double,
             const std::vector <std::vector <node_t>>&);
         bool verify(
@@ -60,7 +61,10 @@ namespace Bucket_Partitioned_MDS
             std::ostream&) const;
     };
 
-    class Solver 
+    // Per-bucket scratch state. Declared here so Solver can reuse it; defined in Solver.cpp.
+    struct Bucket_Workspace;
+
+    class Solver
     {
         /*
         * Solver: Bucket Partitioned MDS solver for solving CVRP
@@ -69,58 +73,53 @@ namespace Bucket_Partitioned_MDS
     private:
         const double alpha;
         const int rho;
-
-        void get_bucket(
-            const CVRP&, 
-            const double, 
-            const double, 
-            std::vector <node_t>&) const;
+        const std::uint64_t seed;
 
         void construct_mst(
-            const CVRP&, 
-            const std::vector <node_t>&, 
-            std::vector <std::vector <node_t>>&) const; 
+            Bucket_Workspace&) const;
 
         distance_t get_route_distance(
-            const CVRP&, 
+            const CVRP&,
             const std::vector <node_t>&) const;
 
         void tsp_approx(
-            const CVRP&, 
-            std::vector <node_t>&, 
-            std::vector <node_t>&, 
+            const CVRP&,
+            std::vector <node_t>&,
+            std::vector <node_t>&,
             node_t) const;
 
         std::vector<std::vector<node_t>> process_tsp_approx(
-            const CVRP&, 
+            const CVRP&,
             const std::vector<std::vector<node_t>>&) const;
 
         void tsp_2OPT(
-            const CVRP&, 
+            const CVRP&,
             std::vector <node_t>&,
-            std::vector <node_t>&, 
+            std::vector <node_t>&,
             int) const;
-        
+
         std::vector<std::vector<node_t>> process_2OPT(
             const CVRP&,
             const std::vector<std::vector<node_t>>&) const;
-        
+
         void process_routes(
-            const CVRP&, 
-            std::vector <std::vector<int>>&, 
+            const CVRP&,
+            std::vector <std::vector<int>>&,
             distance_t&) const;
 
-        void get_routes(
-            const CVRP&, 
-            const std::vector <std::vector <node_t>>&, 
-            const std::vector <node_t>&, 
-            std::vector <std::vector <node_t>>&, 
+        void solve_bucket(
+            const CVRP&,
+            const std::vector <node_t>&,
+            const int,
+            const bool,
+            std::vector <std::vector <node_t>>&,
             distance_t&) const;
 
     public:
         Solver(
-            const double, 
-            const int);
+            const double,
+            const int,
+            const std::uint64_t = 0);
 
         Solution solve(
             const CVRP&) const;

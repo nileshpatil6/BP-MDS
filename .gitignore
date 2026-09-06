@@ -64,3 +64,5 @@ build/
 Inputs/CVRPLIB/
 Inputs/Synthetic/
 Inputs/FILO2/
+# local benchmark outputs
+Results/Output/bench/

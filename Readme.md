@@ -51,7 +51,7 @@ The code follows this pipeline end-to-end (`Src/Main.cpp` → `Lib/Bucket_Partit
 
 **In one line:** *partition → MST → diversify DFS → split → local search → parallel reduce → solution.*
 
-See [`Results/IMPROVEMENTS.md`](Results/IMPROVEMENTS.md) for the September 2026 rewrite: 3x to 10x faster and up to 15% cheaper at million scale.
+See [`Results/IMPROVEMENTS.md`](Results/IMPROVEMENTS.md) for the September 2026 rewrite: 3x to 14x faster and up to 15% cheaper at million scale. Independent checker: `Scripts/verify_solution.py`.
 
 ---
 
@@ -106,7 +106,7 @@ mkdir -p Results/Output/Sample
 | `--output` | Where to write the `.sol` |
 | `--seed` | Optional RNG seed for reproducible runs (default random) |
 
-Tuning via environment: `BPMDS_K`, `BPMDS_M`, `BPMDS_KNN`, `BPMDS_WORK`, `BPMDS_PROFILE=1` (see `Results/IMPROVEMENTS.md`).
+Tuning via environment: `BPMDS_K`, `BPMDS_M`, `BPMDS_KNN`, `BPMDS_WORK`, `BPMDS_SPARSE_MST`, `BPMDS_PROFILE=1` (see `Results/IMPROVEMENTS.md`).
 
 Full benchmark catalog (**310** instances: CVRPLIB · FILO2 · Synthetic) → [`Inputs/README.md`](Inputs/README.md)  
 Large `.vrp` sets ship as **GitHub Release** zips (folders are gitignored).

@@ -58,6 +58,8 @@ namespace Bucket_Partitioned_MDS
         const int KNN = env_int("BPMDS_KNN", 32);
         // Work bound for the inter-route search, as a multiple of bucket size
         const int INTER_WORK_FACTOR = env_int("BPMDS_WORK", 50);
+        // Buckets larger than this use the k-NN sparse MST instead of dense Prim
+        const int SPARSE_MST_MIN_NODES = env_int("BPMDS_SPARSE_MST", 4000);
 
         // Optional phase profiling (BPMDS_PROFILE=1): CPU seconds summed over all threads
         enum Phase { P_MST, P_DFS, P_KNN, P_SPLIT, P_INTRA, P_INTER, P_FINAL, P_COUNT };
@@ -605,6 +607,77 @@ namespace Bucket_Partitioned_MDS
         }
 
         /*
+        * sparse_mst: spanning tree over the k-NN graph (plus depot-to-everyone edges) with
+        * Kruskal, then any remaining components are stitched with their nearest outside
+        * node. O(n k log(n k)) instead of the dense O(n^2) Prim; for k = 32 the result is
+        * the Euclidean MST in practice. Used for large buckets only.
+        */
+        void sparse_mst(Bucket_Workspace& ws, const std::vector <int>& knn, int k)
+        {
+            const int n = ws.n;
+            struct E { distance_t w; int u, v; };
+            std::vector <E> edges;
+            edges.reserve((size_t)n * k + n);
+            for (int u = 1; u < n; u++)
+                for (int j = 0; j < k; j++)
+                {
+                    const int v = knn[(size_t)u * k + j];
+                    if (v < 0) break;
+                    if (u < v) edges.push_back({ ws.dist(u, v), u, v });
+                }
+            for (int v = 1; v < n; v++) edges.push_back({ ws.d0[v], 0, v });
+            std::sort(edges.begin(), edges.end(), [](const E& a, const E& b) { return a.w < b.w; });
+
+            std::vector <int> uf(n);
+            std::iota(uf.begin(), uf.end(), 0);
+            auto find = [&](int a) { while (uf[a] != a) { uf[a] = uf[uf[a]]; a = uf[a]; } return a; };
+
+            std::vector <std::pair <int, int>> tree;
+            tree.reserve(n - 1);
+            for (const E& e : edges)
+            {
+                const int a = find(e.u), b = find(e.v);
+                if (a == b) continue;
+                uf[a] = b;
+                tree.push_back({ e.u, e.v });
+                if ((int)tree.size() == n - 1) break;
+            }
+
+            // Stitch leftover components (rare): smallest component to its nearest outsider
+            while ((int)tree.size() < n - 1)
+            {
+                std::vector <int> root(n);
+                std::vector <int> size(n, 0);
+                for (int v = 0; v < n; v++) { root[v] = find(v); size[root[v]]++; }
+                int small = -1;
+                for (int v = 0; v < n; v++) if (size[v] > 0 && (small < 0 || size[v] < size[small])) small = v;
+                distance_t best = DBL_MAX; int bu = -1, bv = -1;
+                for (int u = 0; u < n; u++)
+                {
+                    if (root[u] != small) continue;
+                    for (int v = 0; v < n; v++)
+                    {
+                        if (root[v] == small) continue;
+                        const distance_t d = ws.dist(u, v);
+                        if (d < best) { best = d; bu = u; bv = v; }
+                    }
+                }
+                uf[find(bu)] = find(bv);
+                tree.push_back({ bu, bv });
+            }
+
+            std::fill(ws.off.begin(), ws.off.end(), 0);
+            for (auto& e : tree) { ws.off[e.first + 1]++; ws.off[e.second + 1]++; }
+            for (int v = 0; v < n; v++) ws.off[v + 1] += ws.off[v];
+            std::vector <int> fill(ws.off.begin(), ws.off.end() - 1);
+            for (auto& e : tree)
+            {
+                ws.adj[fill[e.first]++] = e.second;
+                ws.adj[fill[e.second]++] = e.first;
+            }
+        }
+
+        /*
         * inter_route_search: relocate / swap / tail exchange (2-opt*) between routes of one
         * bucket, candidates restricted to k nearest neighbours. Routes are circular doubly
         * linked lists; route r has sentinel id n + r that stands for the depot.
@@ -915,11 +988,25 @@ namespace Bucket_Partitioned_MDS
         routes.clear();
         cost = 0;
         if (bucket.size() <= 1) return;
+        for (node_t u : bucket)
+        {
+            if (cvrp[u].demand > cvrp.capacity())
+            {
+                HANDLE_ERROR("Customer " + std::to_string(u) + " has demand larger than the vehicle capacity", true);
+            }
+        }
 
         Bucket_Workspace ws;
         ws.init(cvrp, bucket);
         double t0 = omp_get_wtime();
-        construct_mst(ws);
+
+        // Neighbour lists serve both the sparse MST (large buckets) and the inter-route search
+        std::vector <int> knn;
+        build_knn(ws, KNN, knn);
+        add_phase(P_KNN, omp_get_wtime() - t0); t0 = omp_get_wtime();
+
+        if (ws.n > SPARSE_MST_MIN_NODES) sparse_mst(ws, knn, KNN);
+        else                             construct_mst(ws);
         add_phase(P_MST, omp_get_wtime() - t0); t0 = omp_get_wtime();
 
         // Exploitation: rho random DFS orderings, each fully determined by its seed
@@ -950,10 +1037,6 @@ namespace Bucket_Partitioned_MDS
         std::iota(order.begin(), order.end(), 0);
         std::partial_sort(order.begin(), order.begin() + K, order.end(),
             [&](int a, int b) { return greedy_cost[a] < greedy_cost[b]; });
-
-        std::vector <int> knn;
-        build_knn(ws, KNN, knn);
-        add_phase(P_KNN, omp_get_wtime() - t0); t0 = omp_get_wtime();
 
         // Stage 1: optimal split + intra-route polish for each of the K orderings
         struct Candidate { distance_t cost; std::vector <std::vector <int>> routes; };

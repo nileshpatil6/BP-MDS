@@ -239,27 +239,49 @@ namespace Bucket_Partitioned_MDS
     namespace
     {
         /*
-        * random_dfs: One randomized DFS over the MST starting at the depot (local 0).
-        * Children of each node are visited in a random order drawn from `seed`.
-        * The customers are chained in visitation order and cut greedily whenever
-        * the next customer does not fit in the vehicle. Returns the greedy cost.
-        * If record is true, the visitation order (customers only) is stored in ws.seq.
-        * No heap allocation happens here.
+        * random_dfs: One random depth-first traversal of a bucket's MST.
+        *
+        * WHY THIS FUNCTION IS THE MAIN SPEED CHANGE
+        * -------------------------------------------
+        * `rho` is normally 1,000 or 10,000, so this function is called that many
+        * times PER bucket.  At million scale, it is therefore the hottest loop.
+        *
+        * The old implementation allocated `new node_t[...]` neighbour arrays at
+        * every visited tree node, constructed a `vector` for every truck route,
+        * and destroyed all of that state for almost every losing random sample.
+        * That was bookkeeping, not useful search work.
+        *
+        * The new implementation reuses the arrays owned by Bucket_Workspace.
+        * Each ordinary sample only returns a number: its greedy route cost.  It
+        * does NOT create route vectors.  The random traversal is reproducible
+        * from `seed`, so after ranking all samples we replay only the few best
+        * seeds with RECORD=true to construct their actual customer order/routes.
+        *
+        * This preserves the randomized DFS search itself; it eliminates repeated
+        * allocation, deallocation, and route-vector construction around it.
         */
         template <bool RECORD>
         distance_t random_dfs(Bucket_Workspace& ws, std::uint64_t seed)
         {
             const int n = ws.n;
             const int* off = ws.off.data();
+            // All scratch buffers below were allocated ONCE in ws.init().  `.data()`
+            // merely obtains raw pointers to that reusable storage; it allocates
+            // nothing on this DFS call.
             int* adj = ws.adj_scratch.data();
             char* visited = ws.visited.data();
             int* st_node = ws.stack_node.data();
             int* st_pos = ws.stack_pos.data();
             const demand_t* dem = ws.dem.data();
 
+            // Make a reusable working copy because this DFS shuffles child order.
+            // memcpy/memset reset existing contiguous memory; unlike the old code,
+            // no `new`, `delete`, vector growth, or per-node heap allocation occurs.
             std::memcpy(adj, ws.adj.data(), sizeof(int) * ws.adj.size());
             std::memset(visited, 0, n);
 
+            // A seed recreates exactly the same branch choices later.  This lets us
+            // store only (cost, sample index) for losers instead of their routes.
             Fast_RNG rng(seed);
             auto shuffle_children = [&](int u)
             {
@@ -307,6 +329,9 @@ namespace Bucket_Partitioned_MDS
                 cost += (prev == 0) ? ws.d0[v] : ws.dist(prev, v);
                 residue -= d;
                 prev = v;
+                // Normal rho samples never write a route: they need only `cost`.
+                // Selected samples are replayed with RECORD=true, then their exact
+                // customer order is saved for the split/local-search stages.
                 if (RECORD) ws.seq[seq_len++] = v;
 
                 shuffle_children(v);
@@ -1009,7 +1034,12 @@ namespace Bucket_Partitioned_MDS
         else                             construct_mst(ws);
         add_phase(P_MST, omp_get_wtime() - t0); t0 = omp_get_wtime();
 
-        // Exploitation: rho random DFS orderings, each fully determined by its seed
+        // PHASE A: cheaply score ALL rho randomized DFS orderings.
+        //
+        // `random_dfs<false>` follows exactly the same seeded DFS traversal as a
+        // full construction, but returns only its cost.  Therefore 1,000 samples
+        // require no 1,000 sets of route vectors.  `greedy_cost[t]` is sufficient
+        // to decide which sample indices are worth rebuilding.
         std::vector <distance_t> greedy_cost(rho);
         if (inner_parallel)
         {
@@ -1018,6 +1048,8 @@ namespace Bucket_Partitioned_MDS
             #pragma omp parallel for schedule(static)
             for (int t = 0; t < rho; t++)
             {
+                // A separate reusable workspace per worker prevents races while
+                // preserving the no-allocation DFS fast path.
                 greedy_cost[t] = random_dfs<false>(ws_pool[omp_get_thread_num()], mix_seed(seed, bucket_id, t));
             }
         }
@@ -1031,7 +1063,11 @@ namespace Bucket_Partitioned_MDS
 
         add_phase(P_DFS, omp_get_wtime() - t0); t0 = omp_get_wtime();
 
-        // Pick the best few orderings; for each: optimal split -> intra LS -> inter-route LS -> intra LS
+        // PHASE B: rank the cheap scores, then rebuild ONLY the best K samples.
+        // This replay is exact because (global seed, bucket id, sample id) produces
+        // the same DFS branch shuffles as it did during PHASE A.
+        // The expensive route vectors now exist for K candidates (default 16), not
+        // for every rho candidate (normally 1,000 or 10,000).
         const int K = std::min(rho, SPLIT_CANDIDATES);
         std::vector <int> order(rho);
         std::iota(order.begin(), order.end(), 0);
@@ -1044,7 +1080,7 @@ namespace Bucket_Partitioned_MDS
         for (int c = 0; c < K; c++)
         {
             const int t = order[c];
-            random_dfs<true>(ws, mix_seed(seed, bucket_id, t));
+            random_dfs<true>(ws, mix_seed(seed, bucket_id, t)); // replay winning DFS and record its order
             optimal_split(ws, stage[c].routes);
             add_phase(P_SPLIT, omp_get_wtime() - t0); t0 = omp_get_wtime();
             stage[c].cost = intra_route_polish(ws, stage[c].routes);
@@ -1104,13 +1140,30 @@ namespace Bucket_Partitioned_MDS
         std::vector <std::vector<node_t>> buckets(num_buckets);
         create_buckets(cvrp, buckets);
 
-        // Two-level parallelism without oversubscription: when there are enough buckets
-        // to fill the machine, run buckets in parallel and each bucket's rho loop serially.
-        // Otherwise run buckets one at a time and parallelise the rho loop inside.
+        // WHY WE CHOOSE ONLY ONE PARALLEL LEVEL
+        // -------------------------------------
+        // There are two independent kinds of work:
+        //   (1) solve different angular buckets, and
+        //   (2) try the rho random DFS samples inside one bucket.
+        //
+        // The old code put `#pragma omp parallel for` around BOTH loops.  Nested
+        // OpenMP is not a good default here: depending on the OpenMP configuration,
+        // inner regions can create too many runnable threads or be serialized.  In
+        // both cases it adds scheduling overhead and makes scaling unpredictable.
+        //
+        // New policy: use the machine's worker threads once, at the level with
+        // enough work to keep them busy.
+        //   - many buckets: workers solve separate buckets; rho is serial inside;
+        //   - few large buckets: solve one bucket at a time; workers split its rho
+        //     samples (see `inner_parallel` in solve_bucket()).
+        // This does not change which searches are evaluated; it controls only how
+        // the available CPU threads are assigned to those searches.
         const int nth = omp_get_max_threads();
         const bool buckets_parallel = num_buckets >= nth;
 
-        // Largest buckets first so the dynamic schedule packs well
+        // Buckets can have unequal customer counts.  Largest first plus dynamic
+        // scheduling stops one worker being left with a huge final bucket while
+        // other workers are idle.
         std::vector <int> order(num_buckets);
         std::iota(order.begin(), order.end(), 0);
         std::sort(order.begin(), order.end(),

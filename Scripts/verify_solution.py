@@ -36,6 +36,9 @@ def read_vrp(path):
 
 
 def main():
+    if len(sys.argv) != 3:
+        print("usage: python3 Scripts/verify_solution.py instance.vrp solution.sol")
+        sys.exit(2)
     vrp, sol = sys.argv[1], sys.argv[2]
     coords, demands, cap = read_vrp(vrp)
     n = len(coords)
@@ -76,11 +79,18 @@ def main():
     if reported_cost is None:
         print("FAIL: no Cost line")
         sys.exit(1)
-    rel = abs(total - reported_cost) / reported_cost
+    abs_diff = abs(total - reported_cost)
+    rel = abs_diff / reported_cost
     print(f"customers={n - 1} routes={nroutes} capacity={cap:g} max_route_load={worst_load:g}")
     print(f"recomputed={total:.4f} reported={reported_cost:.4f} rel_diff={rel:.2e}")
-    if rel > 1e-9:
-        print("FAIL: cost mismatch")
+    # Solution::print writes the cost with fixed precision of four decimal
+    # places.  Therefore an independent recomputation is expected to differ by
+    # a small rounding amount even when the route is exactly correct.  Allow
+    # 1e-4 absolute error for that printed precision, plus a tiny relative
+    # allowance for a different order of floating-point additions at 1M scale.
+    tolerance = max(1e-4, abs(reported_cost) * 1e-12)
+    if abs_diff > tolerance:
+        print(f"FAIL: cost mismatch (absolute difference {abs_diff:.6g} > tolerance {tolerance:.6g})")
         sys.exit(1)
     print("OK")
 

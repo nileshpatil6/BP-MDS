@@ -23,7 +23,7 @@ cost; agreement is within 1e-12 relative on all files).
 Notes.
 - Baseline cost varies with `random_device`; two baseline runs on the synthetic instance gave 1,221,080,092 and 1,220,671,450. New-solver runs with seeds 1, 2, 3 gave 1,035,473,054 / 1,035,200,485 / 1,035,274,446, so the gap is far outside run-to-run noise.
 - rho = 10000 on the synthetic instance: 35.7 s, cost 1,035,503,337. The local search now dominates solution quality, so the large rho used in the original experiments no longer buys cost. The old solver at rho = 10000 would take roughly 400 s.
-- The synthetic instance needs 130,386 routes instead of 154,795: the optimal split packs vehicles fuller, which is where most of the 15% comes from. Lazio has unit demands and every route is already exactly full (50), so its cost gain is small and its win is time.
+- The synthetic instance needs 130,386 routes instead of 154,795: the optimal split packs vehicles fuller, which is where most of the 15% comes from. Lazio has demands 1, 2, 3 in equal thirds (total 1,998,931, capacity 50), so the lower bound is 39,979 routes; the new solution uses 40,422, about 1.1% above the bound, so almost nothing is left to gain from packing and its win is time.
 - Peak memory rises (synthetic 20 MB to 32 MB, Lazio 49 MB to 228 MB) because each bucket keeps a few candidate route sets and neighbour lists alive; still negligible next to the 1M-node instance itself.
 
 ## Smaller CVRPLIB instances (sanity check against best known solutions, rho 1000, repo's best alpha)
